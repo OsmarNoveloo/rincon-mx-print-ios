@@ -33,7 +33,7 @@ jobs:
         working-directory: ios
         run: |
           set -euo pipefail
-          WORKSPACE=$(ls *.xcworkspace | head -n1)
+          WORKSPACE=$(ls -d *.xcworkspace | head -n1)
           SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list \
             | awk '/Schemes:/{flag=1;next}/^$/{flag=0}flag' \
             | sed 's/^[ \t]*//' | head -n1)

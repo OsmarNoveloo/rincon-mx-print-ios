@@ -25,7 +25,7 @@ workflows:
         script: |
           set -euo pipefail
           cd ios
-          WORKSPACE=$(ls *.xcworkspace | head -n1)
+          WORKSPACE=$(ls -d *.xcworkspace | head -n1)
           SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list \
             | awk '/Schemes:/{flag=1;next}/^$/{flag=0}flag' \
             | sed 's/^[ \t]*//' | head -n1)
