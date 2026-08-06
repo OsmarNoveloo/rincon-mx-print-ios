@@ -40,8 +40,15 @@ workflows:
         script: |
           set -euo pipefail
           cd ios
+          APP_PATH=$(find build/Build/Products -maxdepth 2 -name "*.app" | head -n1)
+          if [ -z "$APP_PATH" ]; then
+            echo "No se encontró ningún .app compilado. Contenido de build/Build/Products:" >&2
+            find build/Build/Products -maxdepth 3 >&2 || true
+            exit 1
+          fi
+          echo "app=$APP_PATH"
           mkdir -p Payload
-          cp -r build/Build/Products/Release-iphoneos/*.app Payload/
+          cp -r "$APP_PATH" Payload/
           zip -r RinconPrint-unsigned.ipa Payload
     artifacts:
       - ios/RinconPrint-unsigned.ipa
