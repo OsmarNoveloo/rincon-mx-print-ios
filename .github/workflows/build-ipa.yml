@@ -34,9 +34,8 @@ jobs:
         run: |
           set -euo pipefail
           WORKSPACE=$(ls -d *.xcworkspace | head -n1)
-          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list \
-            | awk '/Schemes:/{flag=1;next}/^$/{flag=0}flag' \
-            | sed 's/^[ \t]*//' | head -n1)
+          PROJECT=$(find . -maxdepth 1 -name "*.xcodeproj" ! -name "Pods.xcodeproj" | head -n1)
+          SCHEME=$(basename "$PROJECT" .xcodeproj)
           echo "workspace=$WORKSPACE scheme=$SCHEME"
           xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" \
             -configuration Release -sdk iphoneos \
