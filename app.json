@@ -1,13 +1,19 @@
 {
   "expo": {
-    "name": "rincon-mx-print-ios",
+    "name": "Rincon Print",
     "slug": "rincon-mx-print-ios",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "scheme": "rinconprint",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "mx.rincon.print",
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "Se usa Bluetooth para conectarse a la impresora de tickets.",
+        "NSBluetoothPeripheralUsageDescription": "Se usa Bluetooth para conectarse a la impresora de tickets."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -20,6 +26,9 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "react-native-ble-plx"
+    ]
   }
 }

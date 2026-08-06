@@ -1,0 +1,58 @@
+name: Build unsigned .ipa
+
+# Genera un .ipa SIN FIRMAR (sin cuenta de Apple Developer de pago). Se instala
+# en el iPhone con AltStore/AltServer, que lo firma con un Apple ID gratuito.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Expo prebuild (genera el proyecto ios/ nativo)
+        run: npx expo prebuild -p ios
+        env:
+          CI: 1
+
+      - name: pod install
+        working-directory: ios
+        run: pod install
+
+      - name: Build unsigned .app
+        working-directory: ios
+        run: |
+          set -euo pipefail
+          WORKSPACE=$(ls *.xcworkspace | head -n1)
+          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list \
+            | awk '/Schemes:/{flag=1;next}/^$/{flag=0}flag' \
+            | sed 's/^[ \t]*//' | head -n1)
+          echo "workspace=$WORKSPACE scheme=$SCHEME"
+          xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" \
+            -configuration Release -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package .ipa
+        working-directory: ios
+        run: |
+          set -euo pipefail
+          mkdir -p Payload
+          cp -r build/Build/Products/Release-iphoneos/*.app Payload/
+          zip -r RinconPrint-unsigned.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RinconPrint-unsigned-ipa
+          path: ios/RinconPrint-unsigned.ipa
