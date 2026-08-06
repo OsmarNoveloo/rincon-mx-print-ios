@@ -1,0 +1,47 @@
+workflows:
+  ios-unsigned:
+    name: Build unsigned ipa
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    environment:
+      node: 22
+    triggering:
+      events: []
+    scripts:
+      - name: Install npm dependencies
+        script: npm ci
+
+      - name: Expo prebuild (genera el proyecto ios/ nativo)
+        script: npx expo prebuild -p ios
+        environment:
+          CI: 1
+
+      - name: pod install
+        script: |
+          cd ios
+          pod install
+
+      - name: Build unsigned .app
+        script: |
+          set -euo pipefail
+          cd ios
+          WORKSPACE=$(ls *.xcworkspace | head -n1)
+          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list \
+            | awk '/Schemes:/{flag=1;next}/^$/{flag=0}flag' \
+            | sed 's/^[ \t]*//' | head -n1)
+          echo "workspace=$WORKSPACE scheme=$SCHEME"
+          xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" \
+            -configuration Release -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package .ipa
+        script: |
+          set -euo pipefail
+          cd ios
+          mkdir -p Payload
+          cp -r build/Build/Products/Release-iphoneos/*.app Payload/
+          zip -r RinconPrint-unsigned.ipa Payload
+    artifacts:
+      - ios/RinconPrint-unsigned.ipa
