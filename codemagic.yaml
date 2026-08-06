@@ -5,6 +5,8 @@ workflows:
     instance_type: mac_mini_m1
     environment:
       node: 22
+      vars:
+        CI: 1
     triggering:
       events: []
     scripts:
@@ -13,8 +15,6 @@ workflows:
 
       - name: Expo prebuild (genera el proyecto ios/ nativo)
         script: npx expo prebuild -p ios
-        environment:
-          CI: 1
 
       - name: pod install
         script: |
