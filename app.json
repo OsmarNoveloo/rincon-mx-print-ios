@@ -12,7 +12,8 @@
       "bundleIdentifier": "mx.rincon.print",
       "infoPlist": {
         "NSBluetoothAlwaysUsageDescription": "Se usa Bluetooth para conectarse a la impresora de tickets.",
-        "NSBluetoothPeripheralUsageDescription": "Se usa Bluetooth para conectarse a la impresora de tickets."
+        "NSBluetoothPeripheralUsageDescription": "Se usa Bluetooth para conectarse a la impresora de tickets.",
+        "UIBackgroundModes": ["bluetooth-central"]
       }
     },
     "android": {
