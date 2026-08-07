@@ -1,7 +1,24 @@
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { Device } from 'react-native-ble-plx';
-import { ensurePermissions, listWritableCharacteristics, savePrinter, scanForDevices, testCandidate, type Candidate, type SavedPrinter } from './ble';
+import { ensurePermissions, getLog, listWritableCharacteristics, onLog, savePrinter, scanForDevices, testCandidate, type Candidate, type SavedPrinter } from './ble';
+
+function LogPanel({ log }: { log: string[] }) {
+	const scrollRef = useRef<ScrollView>(null);
+	if (log.length === 0) return null;
+	return (
+		<View style={styles.logPanel}>
+			<Text style={styles.logTitle}>Log</Text>
+			<ScrollView ref={scrollRef} style={styles.logScroll} onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}>
+				{log.map((line, i) => (
+					<Text key={i} style={styles.logLine}>
+						{line}
+					</Text>
+				))}
+			</ScrollView>
+		</View>
+	);
+}
 
 export function PrinterSettings({ onDone }: { onDone: () => void }) {
 	const [devices, setDevices] = useState<Device[]>([]);
@@ -12,6 +29,9 @@ export function PrinterSettings({ onDone }: { onDone: () => void }) {
 	const [candidates, setCandidates] = useState<Candidate[] | null>(null);
 	const [busyIndex, setBusyIndex] = useState<number | null>(null);
 	const [loadingCandidates, setLoadingCandidates] = useState(false);
+	const [log, setLog] = useState<string[]>(getLog());
+
+	useEffect(() => onLog((line) => setLog((prev) => [...prev, line])), []);
 
 	useEffect(() => {
 		let stopScan: (() => void) | undefined;
@@ -96,6 +116,8 @@ export function PrinterSettings({ onDone }: { onDone: () => void }) {
 					)}
 				/>
 
+				<LogPanel log={log} />
+
 				<Pressable
 					style={styles.doneButton}
 					onPress={() => {
@@ -133,6 +155,8 @@ export function PrinterSettings({ onDone }: { onDone: () => void }) {
 				ListEmptyComponent={!scanning ? <Text style={styles.empty}>No se encontraron dispositivos</Text> : null}
 			/>
 
+			<LogPanel log={log} />
+
 			<Pressable style={styles.doneButton} onPress={onDone}>
 				<Text style={styles.doneButtonText}>Listo</Text>
 			</Pressable>
@@ -157,4 +181,8 @@ const styles = StyleSheet.create({
 	empty: { color: '#999', textAlign: 'center', marginTop: 40 },
 	doneButton: { backgroundColor: '#1565c0', borderRadius: 8, paddingVertical: 14, alignItems: 'center', marginTop: 12 },
 	doneButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+	logPanel: { maxHeight: 160, marginTop: 12, backgroundColor: '#111', borderRadius: 8, padding: 10 },
+	logTitle: { color: '#8bc34a', fontSize: 11, fontWeight: '700', marginBottom: 4 },
+	logScroll: { flexGrow: 0 },
+	logLine: { color: '#c8e6c9', fontSize: 10, fontFamily: 'Courier', marginBottom: 2 },
 });

@@ -4,9 +4,16 @@ import { PermissionsAndroid, Platform } from 'react-native';
 import { bytesToBase64 } from './base64';
 
 const STORAGE_KEY = 'rincon-print/printer';
-// La mayoría de las impresoras térmicas baratas con modo BLE no aceptan paquetes
-// grandes de una sola vez; se manda en trozos chicos y conservadores.
-const CHUNK_SIZE = 180;
+// El chip serial-a-BLE de estos módulos baratos (CC41-A/HM-10 y clones, que es
+// lo que trae por dentro la MP210) casi nunca negocia un MTU mayor al default
+// de 23 bytes (20 útiles). Si se manda un chunk más grande con
+// writeWithoutResponse, iOS/el módulo lo descarta sin avisar — no truena nada,
+// simplemente no llega. Por eso "conecta pero no imprime nada" incluso en la
+// prueba: los writes nunca fallan, solo no producen efecto.
+const CHUNK_SIZE = 20;
+// Además el buffer UART del módulo es diminuto: mandar chunks pegados sin
+// pausa lo desborda y también se pierden bytes. Se espera un poco entre cada uno.
+const CHUNK_DELAY_MS = 20;
 
 export interface Candidate {
 	serviceUUID: string;
@@ -20,6 +27,32 @@ export interface SavedPrinter extends Candidate {
 }
 
 export const manager = new BleManager();
+
+// Log en memoria para depurar en el teléfono, donde no hay consola a la mano.
+// PrinterSettings se suscribe a esto y lo pinta en pantalla.
+type LogListener = (line: string) => void;
+const logListeners = new Set<LogListener>();
+const logLines: string[] = [];
+
+export function onLog(listener: LogListener): () => void {
+	logListeners.add(listener);
+	return () => logListeners.delete(listener);
+}
+
+export function getLog(): string[] {
+	return logLines;
+}
+
+export function clearLog(): void {
+	logLines.length = 0;
+}
+
+function log(line: string): void {
+	const stamped = `${new Date().toLocaleTimeString()}  ${line}`;
+	logLines.push(stamped);
+	if (logLines.length > 300) logLines.shift();
+	for (const listener of logListeners) listener(stamped);
+}
 
 export async function ensurePermissions(): Promise<void> {
 	if (Platform.OS !== 'android') return;
@@ -55,9 +88,12 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 // respiro corto antes de descubrir servicios, y se pone un timeout explícito para
 // no quedarse colgado esperando una respuesta que ya no va a llegar.
 async function connectAndSettle(device: Device): Promise<Device> {
+	log(`Conectando a ${device.name ?? device.id}…`);
 	const connected = (await device.isConnected()) ? device : await device.connect({ timeout: 8000 });
+	log('Conectado, esperando 300ms antes de descubrir servicios…');
 	await delay(300);
 	await withTimeout(connected.discoverAllServicesAndCharacteristics(), 8000, 'Descubrir servicios');
+	log('Servicios descubiertos');
 	return connected;
 }
 
@@ -82,6 +118,7 @@ export async function listWritableCharacteristics(device: Device): Promise<Candi
 			}
 		}
 	}
+	log(`${candidates.length} characteristic(s) escribibles encontradas`);
 	return candidates;
 }
 
@@ -103,14 +140,25 @@ function chunk(bytes: Uint8Array, size: number): Uint8Array[] {
 }
 
 async function writeBytes(deviceId: string, candidate: Candidate, bytes: Uint8Array): Promise<void> {
-	for (const part of chunk(bytes, CHUNK_SIZE)) {
-		const base64 = bytesToBase64(part);
-		if (candidate.writeWithResponse) {
-			await manager.writeCharacteristicWithResponseForDevice(deviceId, candidate.serviceUUID, candidate.characteristicUUID, base64);
-		} else {
-			await manager.writeCharacteristicWithoutResponseForDevice(deviceId, candidate.serviceUUID, candidate.characteristicUUID, base64);
+	const parts = chunk(bytes, CHUNK_SIZE);
+	const mode = candidate.writeWithResponse ? 'con respuesta' : 'sin respuesta';
+	log(`Mandando ${bytes.length} bytes en ${parts.length} trozo(s) (${mode}) a char ${candidate.characteristicUUID}`);
+	for (let i = 0; i < parts.length; i++) {
+		const base64 = bytesToBase64(parts[i]);
+		try {
+			if (candidate.writeWithResponse) {
+				await manager.writeCharacteristicWithResponseForDevice(deviceId, candidate.serviceUUID, candidate.characteristicUUID, base64);
+			} else {
+				await manager.writeCharacteristicWithoutResponseForDevice(deviceId, candidate.serviceUUID, candidate.characteristicUUID, base64);
+			}
+			log(`Trozo ${i + 1}/${parts.length} enviado (${parts[i].length} bytes)`);
+		} catch (err) {
+			log(`Error en trozo ${i + 1}/${parts.length}: ${err instanceof Error ? err.message : String(err)}`);
+			throw err;
 		}
+		if (i < parts.length - 1) await delay(CHUNK_DELAY_MS);
 	}
+	log('Todos los trozos enviados');
 }
 
 // Ticket mínimo ESC/POS: init + texto + varios saltos de línea. Sin comando de
@@ -125,11 +173,18 @@ export function buildTestTicket(): Uint8Array {
 }
 
 export async function testCandidate(device: Device, candidate: Candidate): Promise<void> {
-	const connected = await connectAndSettle(device);
+	clearLog();
 	try {
-		await writeBytes(connected.id, candidate, buildTestTicket());
-	} finally {
-		await connected.cancelConnection();
+		const connected = await connectAndSettle(device);
+		try {
+			await writeBytes(connected.id, candidate, buildTestTicket());
+		} finally {
+			await connected.cancelConnection();
+			log('Conexión cerrada');
+		}
+	} catch (err) {
+		log(`Falló la prueba: ${err instanceof Error ? err.message : String(err)}`);
+		throw err;
 	}
 }
 
@@ -152,16 +207,26 @@ export async function pingPrinter(deviceId: string): Promise<boolean> {
 }
 
 export async function printBytes(bytes: Uint8Array): Promise<void> {
-	const printer = await getSavedPrinter();
-	if (!printer) throw new Error('No hay impresora configurada. Ve a Configurar impresora primero.');
-
-	const device = await manager.connectToDevice(printer.deviceId, { timeout: 8000 });
-	await delay(300);
-	await withTimeout(device.discoverAllServicesAndCharacteristics(), 8000, 'Descubrir servicios');
-
+	clearLog();
 	try {
-		await writeBytes(printer.deviceId, printer, bytes);
-	} finally {
-		await device.cancelConnection();
+		const printer = await getSavedPrinter();
+		if (!printer) throw new Error('No hay impresora configurada. Ve a Configurar impresora primero.');
+
+		log(`Conectando a impresora guardada ${printer.deviceName}…`);
+		const device = await manager.connectToDevice(printer.deviceId, { timeout: 8000 });
+		log('Conectado, esperando 300ms antes de descubrir servicios…');
+		await delay(300);
+		await withTimeout(device.discoverAllServicesAndCharacteristics(), 8000, 'Descubrir servicios');
+		log('Servicios descubiertos');
+
+		try {
+			await writeBytes(printer.deviceId, printer, bytes);
+		} finally {
+			await device.cancelConnection();
+			log('Conexión cerrada');
+		}
+	} catch (err) {
+		log(`Falló la impresión: ${err instanceof Error ? err.message : String(err)}`);
+		throw err;
 	}
 }
